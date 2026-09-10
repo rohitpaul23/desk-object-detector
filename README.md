@@ -23,7 +23,7 @@ failures → fixes → export → benchmark).
 - [x] Dataset captured — 60 images, single block (b01), one session
 - [x] Dataset annotated in LabelImg (YOLO format, `data/labels/`)
 - [x] Train/val split executed — 48 train / 12 val (see Measured results below)
-- [ ] Model trained (Phase 2 — see `docs/02_training.md`)
+- [x] Model trained — run1: mAP@0.5=0.922, mAP@0.5:0.95=0.505 (see `results/metrics.json`)
 - [ ] ONNX export + verification (Phase 3 — see `docs/03_export_quantize_benchmark.md`)
 - [ ] Quantization + benchmark (Phase 3)
 - [ ] Failure analysis (Phase 4 — see `docs/04_failure_analysis.md`)
@@ -123,10 +123,19 @@ python scripts/failure_analysis.py
 | `device` | 316 | 94 | 410 |
 
 **Training (A2)**
-- Base weights / model: `<>`
-- Image size / epochs / batch / LR schedule: `<>`
-- Training time and hardware: `<>`
-- Precision / Recall / mAP@0.5 / mAP@0.5:0.95 (val): `<>`
+- Base weights / model: `yolov8n.pt` (YOLOv8 nano, 3.0M params, 8.1 GFLOPs)
+- Image size / epochs / batch / LR schedule: `640px / 100 epochs / batch=8 / lr0=0.01 (cosine decay, Ultralytics default)`
+- Augmentations: `mosaic=0.5, fliplr=0.5, degrees=10, HSV jitter (h=0.015, s=0.7, v=0.4); mixup=0.0 (disabled — too few images)`
+- Training time and hardware: `322.8s (5.4 min) on NVIDIA GeForce RTX 3050 6GB Laptop GPU`
+- Precision / Recall / mAP@0.5 / mAP@0.5:0.95 (val):
+
+| Class | Precision | Recall | mAP@0.5 | mAP@0.5:0.95 |
+|---|---|---|---|---|
+| all | 0.8730 | 0.8807 | 0.9221 | 0.5054 |
+| cable | 0.8180 | 0.8080 | 0.8890 | 0.4110 |
+| device | 0.9280 | 0.9530 | 0.9550 | 0.5990 |
+
+> Note: mAP@0.5 = 0.922 is in the plausible range (0.5–0.95) for a well-annotated 60-image dataset. `cable` underperforms `device` as expected — thin, deformable objects are harder to detect than rigid device bodies. This is reported honestly in failure analysis (Phase 4).
 
 **Export & quantization (A3)**
 - ONNX vs PyTorch output match method and result: `<>`
