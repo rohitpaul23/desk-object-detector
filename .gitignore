@@ -21,10 +21,10 @@ results/train_runs/
 !models/best.pt
 *.cache
 
-# ONNX models (large — link separately if >100MB)
-models/best.onnx
-models/best_int8.onnx
-models/best_fp16.onnx
+# ONNX models (large — link separately if >100MB; these are small enough to commit)
+# models/best.onnx
+# models/best_int8.onnx
+# models/best_fp16.onnx
 
 # IDE / OS
 .idea/

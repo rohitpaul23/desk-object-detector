@@ -24,8 +24,8 @@ failures → fixes → export → benchmark).
 - [x] Dataset annotated in LabelImg (YOLO format, `data/labels/`)
 - [x] Train/val split executed — 48 train / 12 val (see Measured results below)
 - [x] Model trained — run1: mAP@0.5=0.922, mAP@0.5:0.95=0.505 (see `results/metrics.json`)
-- [ ] ONNX export + verification (Phase 3 — see `docs/03_export_quantize_benchmark.md`)
-- [ ] Quantization + benchmark (Phase 3)
+- [x] ONNX export + verification — max_abs_diff=0.000595 PASS, `models/best.onnx` (11.7MB)
+- [x] Quantization + benchmark — INT8 dynamic quant (3.66x smaller, 29x slower on CPU — documented)
 - [ ] Failure analysis (Phase 4 — see `docs/04_failure_analysis.md`)
 - [ ] Part D deployment design written
 - [ ] Screen recording linked below
@@ -138,9 +138,18 @@ python scripts/failure_analysis.py
 > Note: mAP@0.5 = 0.922 is in the plausible range (0.5–0.95) for a well-annotated 60-image dataset. `cable` underperforms `device` as expected — thin, deformable objects are harder to detect than rigid device bodies. This is reported honestly in failure analysis (Phase 4).
 
 **Export & quantization (A3)**
-- ONNX vs PyTorch output match method and result: `<>`
-- Reduced precision used (INT8 or FP16) and why: `<>`
-- Benchmark table (latency mean/p95, file size, val accuracy — FP32 vs reduced): `<>`
+- ONNX vs PyTorch output match method and result: Same val image (`b01_010.jpg`) preprocessed identically (resize 640×640, normalize [0,1], CHW layout). Raw output tensors compared with `np.max(np.abs(pt_out - onnx_out))`. **max_abs_diff = 0.000595 (< 1e-3 threshold → PASS)**. Detection count at conf>0.25: both outputs = 108. Full details in `results/onnx_verification.json`.
+- Reduced precision used: **INT8** via `onnxruntime.quantization.quantize_dynamic` (QInt8). Chosen over FP16 because INT8 offers greater size reduction (~4x vs FP32) and faster integer arithmetic on CPUs with native INT8 support. Passed NaN/Inf sanity check. Details in `results/quantize_log.json`.
+- Benchmark (hardware: CPU — ONNX Runtime CPUExecutionProvider; 600 inferences per model, 5 warmup discarded):
+
+| Metric | FP32 (`best.onnx`) | INT8 (`best_int8.onnx`) |
+|---|---|---|
+| Latency mean (ms/img) | **52.75** | 1528.25 |
+| Latency p95 (ms/img) | **73.50** | 2909.22 |
+| Model file size (MB) | 12.27 | **3.36** |
+| mAP@0.5 (val) | 0.9125 | 0.9155 |
+
+> **Honest finding**: INT8 dynamic quantization is **29x slower** than FP32 on this CPU. This is a known characteristic of `onnxruntime.quantization.quantize_dynamic` applied to YOLO-family models: dynamic quantization only quantizes weight matrices (linear/matmul ops), not convolution kernels, which dominate YOLOv8's compute. The result is increased overhead from dequantize ops with no throughput benefit. mAP@0.5 is unchanged (-0.0030 absolute, within noise). Size reduction is real (3.66x). For latency gains from INT8, static quantization with a calibration set or a hardware target with native INT8 SIMD support would be required.
 
 ## Assumptions
 

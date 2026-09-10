@@ -1,0 +1,14 @@
+{
+  "image_used": "dataset/images/val/b01_010.jpg",
+  "pytorch_weights": "C:\\Users\\rohit\\Downloads\\WORK\\projects\\ARTIKATE\\models\\best.pt",
+  "onnx_model": "models/best.onnx",
+  "max_abs_diff": 0.0005950928,
+  "mean_abs_diff": 1.29781e-05,
+  "pytorch_detections_conf25": 108,
+  "onnx_detections_conf25": 108,
+  "boxes_count_match": true,
+  "numeric_match_passed": true,
+  "method": "Same image preprocessed identically (resize to 640x640, normalize to [0,1], CHW layout). Raw output tensors compared with np.max(np.abs(pt_out - onnx_out)). Additionally decoded detections at conf>0.25 from both outputs and compared count.",
+  "pytorch_inference_ms": 118.37,
+  "onnx_inference_ms": 141.0
+}

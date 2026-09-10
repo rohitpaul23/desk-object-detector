@@ -1,0 +1,12 @@
+{
+  "source_onnx": "C:\\Users\\rohit\\Downloads\\WORK\\projects\\ARTIKATE\\models\\best.onnx",
+  "int8_attempted": true,
+  "int8_success": true,
+  "int8_reason": "INT8 dynamic quantization via onnxruntime.quantization.quantize_dynamic",
+  "fp16_attempted": false,
+  "fp16_success": false,
+  "fp16_reason": "",
+  "chosen_precision": "INT8",
+  "output_model": "C:\\Users\\rohit\\Downloads\\WORK\\projects\\ARTIKATE\\models\\best_int8.onnx",
+  "decision_rationale": "INT8 dynamic quantization succeeded and passed NaN/Inf sanity check. Chosen over FP16 because INT8 offers greater size reduction (~4x vs FP32) and faster CPU inference via integer arithmetic."
+}
