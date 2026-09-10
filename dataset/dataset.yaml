@@ -1,0 +1,8 @@
+path: C:/Users/rohit/Downloads/WORK/projects/ARTIKATE/dataset
+train: images/train
+val: images/val
+nc: 2
+
+names:
+  0: cable
+  1: device
