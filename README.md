@@ -180,4 +180,5 @@ Complete written responses for Parts A4, B (Architectural Choices), C (Deploymen
 
 1. **Static INT8 Calibration Set**: Dynamic INT8 quantization was performed rather than static INT8 quantization because a calibration dataset loader was not integrated. Static quantization with TensorRT/OpenVINO would yield actual speedups on supported accelerators.
 2. **Axis-Aligned Bounding Box Limits on Coiled Cables**: Standard AABB bounding boxes overlap heavily when cables loop or coil. Oriented Bounding Boxes (OBB) or Instance Segmentation would eliminate box overlap clutter.
+3. **Single-Session Dataset Capture (`b01`)**: All 60 images were captured in a single session (`b01`) on a single workspace desk. While block-level splitting prevents train/val data leakage within this session, capturing additional blocks across different rooms, lighting conditions, and surfaces would enhance out-of-domain generalization.
 

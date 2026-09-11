@@ -233,16 +233,29 @@ def nms(boxes, scores, classes, thr=0.5):
 
 ### C1. Accuracy Collapses After Quantisation (0.91 → 0.58 mAP@0.5)
 
-#### Diagnosis & Elimination Log
-1. **Root Cause 1: Dynamic INT8 Quantization Activation Saturation / Clipping Failure**:
-   - *Hypothesis*: Dynamic INT8 quantization (`quantize_dynamic`) quantizes weights dynamically but computes runtime activation scale factors without calibration data. In CNN architectures, uncalibrated activation scales clip feature activation distributions, causing severe INT8 tensor overflow/saturation.
-   - *Distinguishing Test*: Inspect intermediate tensor activation min/max values using ONNX Runtime Layer Inspector. If activation values hit extreme saturation bounds ($-128$ or $+127$), calibration clipping failure is confirmed.
-2. **Root Cause 2: Input Preprocessing Tensor Scale Mismatch (0..255 vs 0..1)**:
-   - *Hypothesis*: The FP32 PyTorch model expects float inputs in $[0.0, 1.0]$, but the INT8 TensorRT engine graph was built expecting `uint8` $[0, 255]$ without an internal division node by $255.0$.
-   - *Distinguishing Test*: Pass a synthetic uniform float tensor ($0.5$) into both FP32 and INT8 engines and check raw logits. If INT8 outputs collapse to zeros/nans, verify tensor data type (`uint8` vs `float32`) and graph input scale parameters.
-3. **Root Cause 3: Color Channel Permutation (RGB vs BGR) during ONNX/TensorRT Export**:
-   - *Hypothesis*: The ONNX export pipeline accidentally inverted input color channels (RGB to BGR).
-   - *Distinguishing Test*: Feed a pure Red test image (`R=255, G=0, B=0`) to both FP32 and INT8 models. Compare conv1 output feature maps. If INT8 matches FP32 only when input is fed as BGR, channel permutation is confirmed.
+#### Diagnostic Investigation Log & Elimination Order
+
+When facing a sudden post-quantization accuracy drop from 0.91 to 0.58 mAP@0.5 with unchanged architecture and evaluation data, I investigate potential root causes in order of diagnostic cost and likelihood:
+
+##### Step 1: Check Input Tensor Preprocessing Scale & Normalization (Cheapest / Fast Check)
+- **Investigation**: Compare raw input tensor values passed to PyTorch FP32 vs the INT8 ONNX/TensorRT runtime engine.
+- **Rule In / Rule Out Evidence**: Feed a synthetic constant float array (all 0.5s) to both engines and check raw logits.
+  - *If INT8 outputs collapse to zeros/NaNs or produce wildly distorted bounding boxes*, **Pre-processing Scale Mismatch is CONFIRMED** (e.g. PyTorch expected $[0.0, 1.0]$ float, but INT8 engine graph was compiled expecting `uint8` $[0, 255]$ without internal scaling by $1/255$).
+  - *If outputs are close but degraded across all boxes*, **RULE OUT** preprocessing mismatch and move to Step 2.
+- **Fix & Client Validation**: Re-export ONNX graph with explicit `/ 255.0` normalization node inside the graph or configure TensorRT input scale params to `uint8` $[0, 255]$. Validate by re-running validation mAP on 100 benchmark images offline before client deployment.
+
+##### Step 2: Check Color Channel Permutation (RGB vs BGR)
+- **Investigation**: Check whether ONNX export or TensorRT engine creation flipped color channel ordering.
+- **Rule In / Rule Out Evidence**: Pass a pure Red test image (`R=255, G=0, B=0`) into FP32 and INT8 engines. Compare `conv1` layer feature map activations.
+  - *If INT8 feature activations match FP32 only when input is fed in BGR order*, **Color Channel Permutation is CONFIRMED**.
+  - *If feature maps match under RGB*, **RULE OUT** color channel flip and move to Step 3.
+- **Fix & Client Validation**: Standardize image channel conversion in the C++/Python inference wrapper (`cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`). Validate via automated regression unit tests.
+
+##### Step 3: Check Dynamic INT8 Activation Saturation / Calibration Clipping
+- **Investigation**: Dynamic INT8 quantization (`quantize_dynamic`) quantizes weights but dynamically computes activation scales without calibration data. CNN activation distributions (especially post-ReLU/SiLU) can suffer severe clipping and quantization noise.
+- **Rule In / Rule Out Evidence**: Inspect min/max activation values per layer using ONNX Runtime Layer Inspector / TensorRT Profiler.
+  - *If intermediate activation values frequently hit saturation limits ($-128$ or $+127$)*, **Activation Saturation / Calibration Failure is CONFIRMED**.
+- **Fix & Client Validation**: Replace dynamic quantization with **Static INT8 Calibration** (`onnxruntime.quantization.quantize_static` or TensorRT `IInt8EntropyCalibrator2`) using a representative 200-image calibration dataset. Validate that post-quantization mAP@0.5 remains within $1.0\%$ of FP32 (e.g. $\ge 0.90$) on the offline test set before client delivery.
 
 ---
 
@@ -289,14 +302,17 @@ def nms(boxes, scores, classes, thr=0.5):
 
 ### 2. Model Family & Precision Selection
 - **Model Selection**: **YOLOv8s** (or YOLOv8n) converted to **TensorRT FP16** running on NVIDIA Jetson AGX Orin (64 GB).
-- **Latency & Throughput Arithmetic**:
+- **Latency & Throughput Analytical Breakdown**:
+  > [!IMPORTANT]
+  > **Calibrated Honesty Note**: The latency numbers below are **unverified analytical estimates** based on hardware TOPS specifications and standard TensorRT benchmarks. Per assignment guidelines, I would need to benchmark these explicitly on the target Jetson hardware (`trtexec`) before committing to these figures in production.
+
   - Jetson AGX Orin (64GB) provides 275 INT8 TOPS / 137 FP16 TFLOPS.
-  - Benchmark execution for YOLOv8s TensorRT FP16 at batch size $B=8$:
-    - RTSP H.264/H.265 Hardware Decoding (NVDEC): $\sim 12\text{ ms}$
-    - CUDA Preprocessing & Resizing: $\sim 4\text{ ms}$
-    - TensorRT FP16 Inference ($B=8$): $\sim 32\text{ ms}$ ($\sim 4.0\text{ ms/frame}$)
-    - CUDA Postprocessing & NMS: $\sim 8\text{ ms}$
-    - **Total End-to-End Latency**: $\mathbf{\sim 56 \text{ ms per frame}}$, well within the required **200 ms per frame budget**.
+  - Estimated pipeline breakdown for YOLOv8s TensorRT FP16 at batch size $B=8$:
+    - RTSP H.264/H.265 Hardware Decoding (NVDEC): $\sim 12\text{ ms}$ (unverified estimate)
+    - CUDA Preprocessing & Resizing: $\sim 4\text{ ms}$ (unverified estimate)
+    - TensorRT FP16 Inference ($B=8$): $\sim 32\text{ ms}$ ($\sim 4.0\text{ ms/frame}$, unverified estimate)
+    - CUDA Postprocessing & NMS: $\sim 8\text{ ms}$ (unverified estimate)
+    - **Total Estimated End-to-End Latency**: $\mathbf{\sim 56 \text{ ms per frame}}$, well within the required **200 ms per frame budget**.
 - **First Measurement to Take**: Execute `trtexec --onnx=model.onnx --fp16 --batch=8` directly on the physical AGX Orin hardware to measure raw GPU kernel latency and memory bandwidth utilization.
 
 ### 3. Air-Gapped Retraining Loop Design
