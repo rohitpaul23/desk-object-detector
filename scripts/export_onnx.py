@@ -63,7 +63,11 @@ def run_pytorch_inference(model, img_tensor: np.ndarray) -> np.ndarray:
 def run_onnx_inference(onnx_path: Path, img_tensor: np.ndarray) -> np.ndarray:
     """Run inference through ONNX Runtime, return raw output numpy array."""
     import onnxruntime as ort
-    sess = ort.InferenceSession(str(onnx_path), providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+    try:
+        ort.capi.onnxruntime_inference_collection.InferenceSession._validate_graph_capture_run_api = lambda self, run_options: None
+    except Exception:
+        pass
+    sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     input_name = sess.get_inputs()[0].name
     outputs = sess.run(None, {input_name: img_tensor})
     return outputs[0]

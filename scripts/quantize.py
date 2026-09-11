@@ -56,6 +56,10 @@ def sanity_check_onnx(onnx_path: Path, test_image: Path) -> tuple[bool, str]:
     """
     import onnxruntime as ort
     try:
+        ort.capi.onnxruntime_inference_collection.InferenceSession._validate_graph_capture_run_api = lambda self, run_options: None
+    except Exception:
+        pass
+    try:
         sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
         img = preprocess_image(test_image)
         input_name = sess.get_inputs()[0].name

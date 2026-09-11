@@ -71,8 +71,12 @@ def benchmark_model(onnx_path: Path, val_images: list[Path],
     Returns dict with mean_ms, p95_ms, and raw latencies.
     """
     import onnxruntime as ort
+    try:
+        ort.capi.onnxruntime_inference_collection.InferenceSession._validate_graph_capture_run_api = lambda self, run_options: None
+    except Exception:
+        pass
 
-    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    providers = ["CPUExecutionProvider"]
     sess = ort.InferenceSession(str(onnx_path), providers=providers)
     input_name = sess.get_inputs()[0].name
 
@@ -111,7 +115,7 @@ def get_map50_onnx(onnx_path: Path, precision_type: str) -> float:
     from ultralytics import YOLO
     print(f"  Running val accuracy check on {onnx_path.name}...")
     model = YOLO(str(onnx_path), task="detect")
-    results = model.val(data=str(DATA_YAML), imgsz=640, split="val", verbose=False)
+    results = model.val(data=str(DATA_YAML), imgsz=640, split="val", device="cpu", verbose=False)
     return round(float(results.box.map50), 6)
 
 

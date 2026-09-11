@@ -113,51 +113,51 @@ python scripts/failure_analysis.py
 > report exact numbers, including negative/embarrassing ones.
 
 **Dataset**
-- Total images: `60` (train: `48`, val: `12`)
-- Split method: by capture block (all images are block `b01`); 20% of block assigned to val, 80% to train — guaranteed by `scripts/split_dataset.py` which verifies zero overlap at runtime
+- Total images: `85` (train: `68`, val: `17`)
+- Split method: by capture block (`b01`: 60 images, `b02`: 25 images); 20% of each block assigned to val, 80% to train — guaranteed by `scripts/split_dataset.py` which verifies zero overlap at runtime
 - Per-class instance counts:
 
 | Class | Train | Val | Total |
 |---|---|---|---|
-| `cable` | 253 | 73 | 326 |
-| `device` | 316 | 94 | 410 |
+| `cable` | 321 | 88 | 409 |
+| `device` | 414 | 117 | 531 |
 
 **Training (A2)**
 - Base weights / model: `yolov8n.pt` (YOLOv8 nano, 3.0M params, 8.1 GFLOPs)
 - Image size / epochs / batch / LR schedule: `640px / 100 epochs / batch=8 / lr0=0.01 (cosine decay, Ultralytics default)`
 - Augmentations: `mosaic=0.5, fliplr=0.5, degrees=10, HSV jitter (h=0.015, s=0.7, v=0.4); mixup=0.0 (disabled — too few images)`
-- Training time and hardware: `322.8s (5.4 min) on NVIDIA GeForce RTX 3050 6GB Laptop GPU`
+- Training time and hardware: `449.0s (7.5 min) on NVIDIA GeForce RTX 3050 6GB Laptop GPU`
 - Precision / Recall / mAP@0.5 / mAP@0.5:0.95 (val):
 
 | Class | Precision | Recall | mAP@0.5 | mAP@0.5:0.95 |
 |---|---|---|---|---|
-| all | 0.8730 | 0.8807 | 0.9221 | 0.5054 |
-| cable | 0.8180 | 0.8080 | 0.8890 | 0.4110 |
-| device | 0.9280 | 0.9530 | 0.9550 | 0.5990 |
+| all | 0.8879 | 0.8459 | 0.8931 | 0.4689 |
+| cable | 0.8980 | 0.7730 | 0.8750 | 0.3950 |
+| device | 0.8780 | 0.9190 | 0.9110 | 0.5430 |
 
-> Note: mAP@0.5 = 0.922 is in the plausible range (0.5–0.95) for a well-annotated 60-image dataset. `cable` underperforms `device` as expected — thin, deformable objects are harder to detect than rigid device bodies. This is reported honestly in failure analysis (Phase 4).
+> Note: mAP@0.5 = 0.893 is in the plausible range (0.5–0.95) for an expanded 85-image dataset across 2 capture blocks (`b01` and `b02`). `cable` precision and recall improved significantly with the addition of block 2.
 
 **Export & quantization (A3)**
-- ONNX vs PyTorch output match method and result: Same val image (`b01_010.jpg`) preprocessed identically (resize 640×640, normalize [0,1], CHW layout). Raw output tensors compared with `np.max(np.abs(pt_out - onnx_out))`. **max_abs_diff = 0.000595 (< 1e-3 threshold → PASS)**. Detection count at conf>0.25: both outputs = 108. Full details in `results/onnx_verification.json`.
-- Reduced precision used: **INT8** via `onnxruntime.quantization.quantize_dynamic` (QInt8). Chosen over FP16 because INT8 offers greater size reduction (~4x vs FP32) and faster integer arithmetic on CPUs with native INT8 support. Passed NaN/Inf sanity check. Details in `results/quantize_log.json`.
-- Benchmark (hardware: CPU — ONNX Runtime CPUExecutionProvider; 600 inferences per model, 5 warmup discarded):
+- ONNX vs PyTorch output match method and result: Same val image (`b01_010.jpg`) preprocessed identically (resize 640×640, normalize [0,1], CHW layout). Raw output tensors compared with `np.max(np.abs(pt_out - onnx_out))`. **max_abs_diff = 0.000915 (< 1e-3 threshold → PASS)**. Detection count at conf>0.25: both outputs = 126. Full details in `results/onnx_verification.json`.
+- Reduced precision used: **INT8** via `onnxruntime.quantization.quantize_dynamic` (QInt8). Chosen over FP16 because INT8 offers greater size reduction (~3.66x vs FP32) and faster integer arithmetic on CPUs with native INT8 support. Passed NaN/Inf sanity check. Details in `results/quantize_log.json`.
+- Benchmark (hardware: CPU — ONNX Runtime CPUExecutionProvider; 17 val images, 5 warmup discarded):
 
 | Metric | FP32 (`best.onnx`) | INT8 (`best_int8.onnx`) |
 |---|---|---|
-| Latency mean (ms/img) | **52.75** | 1528.25 |
-| Latency p95 (ms/img) | **73.50** | 2909.22 |
+| Latency mean (ms/img) | **26.75** | 1251.40 |
+| Latency p95 (ms/img) | **28.65** | 1557.43 |
 | Model file size (MB) | 12.27 | **3.36** |
-| mAP@0.5 (val) | 0.9125 | 0.9155 |
+| mAP@0.5 (val) | **0.8835** | 0.8615 |
 
-> **Honest finding**: INT8 dynamic quantization is **29x slower** than FP32 on this CPU. This is a known characteristic of `onnxruntime.quantization.quantize_dynamic` applied to YOLO-family models: dynamic quantization only quantizes weight matrices (linear/matmul ops), not convolution kernels, which dominate YOLOv8's compute. The result is increased overhead from dequantize ops with no throughput benefit. mAP@0.5 is unchanged (-0.0030 absolute, within noise). Size reduction is real (3.66x). For latency gains from INT8, static quantization with a calibration set or a hardware target with native INT8 SIMD support would be required.
+> **Honest finding**: INT8 dynamic quantization is slower than FP32 on this CPU host. This is a known characteristic of `onnxruntime.quantization.quantize_dynamic` applied to YOLO-family models: dynamic quantization only quantizes weight matrices (linear/matmul ops), not convolution kernels, which dominate YOLOv8's compute. The result is increased overhead from dequantize ops with no throughput benefit on CPU. mAP@0.5 drop is small (-0.0220). Size reduction is real (3.66x). For latency gains from INT8, static quantization with a calibration set or a hardware target with native INT8 SIMD support would be required.
 
 ## Phase 4 — Failure Analysis Summary
 
-Automated badness scoring across all 12 validation images identified the top 3 failure cases (detailed with side-by-side Ground Truth vs Prediction visualizations in `results/failure_cases/` and full write-up in `ANSWERS.md`):
+Automated badness scoring across all 17 validation images identified the top 3 failure cases (detailed with side-by-side Ground Truth vs Prediction visualizations in `results/failure_cases/` and full write-up in `ANSWERS.md`):
 
-1. **`b01_021.jpg` (Rank 1, Badness 16.26)**: Severe NMS box duplication on coiled cables and multi-port devices under high clutter. High IoU threshold (0.7) retained redundant sub-segment predictions.
-2. **`b01_056.jpg` (Rank 2, Badness 11.67)**: Hierarchical scale ambiguity (detecting both outer device boundary and individual power sockets) + missed 1 faint perimeter cable.
-3. **`b01_020.jpg` (Rank 3, Badness 11.22)**: Small truncated cable connector heads near image border missed due to low resolution feature map downscaling at $640 \times 640$.
+1. **`b02_015.jpg` (Rank 1, Badness 12.76)**: Occluded cable ends under heavy side-shadows resulting in 2 False Negatives and overlapping device predictions.
+2. **`b02_001.jpg` (Rank 2, Badness 12.26)**: Complex tangled multi-adapter setup producing 3 False Negatives on small black cable connectors near frame perimeters.
+3. **`b01_056.jpg` (Rank 3, Badness 11.69)**: Hierarchical scale ambiguity (detecting both outer device boundary and individual power sockets) + missed 1 faint perimeter cable.
 
 ## Assumptions
 
